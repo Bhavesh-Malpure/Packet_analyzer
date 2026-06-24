@@ -1065,7 +1065,8 @@ MIT License - Feel free to use this project for learning and development.
 
 <div align="center">
 
-### 🌟 Built with ❤️ for Network Engineers & Security Researchers
+### 🌟 Built with ❤️ for Understanding Computer Network deeply.
+### By Bhavesh Ashok Malpure - bhaveshmalpure18@gmail.com
 
 **Happy learning and hacking!** 🚀
 
