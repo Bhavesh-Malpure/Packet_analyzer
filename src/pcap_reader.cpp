@@ -8,6 +8,7 @@ namespace PacketAnalyzer {
 constexpr uint32_t PCAP_MAGIC_NATIVE = 0xa1b2c3d4;  // Native byte order
 constexpr uint32_t PCAP_MAGIC_SWAPPED = 0xd4c3b2a1; // Swapped byte order
 
+
 PcapReader::~PcapReader() {
     close();
 }
