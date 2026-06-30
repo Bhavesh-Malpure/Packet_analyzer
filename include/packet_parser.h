@@ -13,7 +13,7 @@ namespace PacketAnalyzer {
 struct EthernetHeader {
     std::array<uint8_t, 6> dest_mac;    // Destination MAC address
     std::array<uint8_t, 6> src_mac;     // Source MAC address
-    uint16_t ether_type;                 // Type of payload (0x0800 = IPv4)
+    uint16_t ether_type;               // Type of payload (0x0800 = IPv4)
 };
 
 // IPv4 Header (20-60 bytes, usually 20)
