@@ -14,7 +14,7 @@
 namespace DPI {
 
 // ============================================================================
-// Rule Manager - Manages blocking/filtering rules
+// Rule Manager :- Manages blocking/filtering rules
 // ============================================================================
 // 
 // Rules can be:
