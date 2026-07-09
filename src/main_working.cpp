@@ -316,6 +316,7 @@ int main(int argc, char* argv[]) {
             unique_snis[flow.sni] = flow.app_type;
         }
     }
+
     for (const auto& [sni, app] : unique_snis) {
         std::cout << "  - " << sni << " -> " << appTypeToString(app) << "\n";
     }
