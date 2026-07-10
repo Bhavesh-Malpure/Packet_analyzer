@@ -277,7 +277,20 @@ int main(int argc, char* argv[]) {
     reader.close();
     output.close();
     
-        
+     // Print report generation :
+    std::cout << "\n";
+    std::cout << "╔══════════════════════════════════════════════════════════════╗\n";
+    std::cout << "║                      PROCESSING REPORT                       ║\n";
+    std::cout << "╠══════════════════════════════════════════════════════════════╣\n";
+    std::cout << "║ Total Packets:      " << std::setw(10) << total_packets << "                             ║\n";
+    std::cout << "║ Forwarded:          " << std::setw(10) << forwarded << "                             ║\n";
+    std::cout << "║ Dropped:            " << std::setw(10) << dropped << "                             ║\n";
+    std::cout << "║ Active Flows:       " << std::setw(10) << flows.size() << "                             ║\n";
+    std::cout << "╠══════════════════════════════════════════════════════════════╣\n";
+    std::cout << "║                    APPLICATION BREAKDOWN                     ║\n";
+    std::cout << "╠══════════════════════════════════════════════════════════════╣\n";
+
+    
     // Sort by count
     std::vector<std::pair<AppType, uint64_t>> sorted_apps(app_stats.begin(), app_stats.end());
     std::sort(sorted_apps.begin(), sorted_apps.end(),
