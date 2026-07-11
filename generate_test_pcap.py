@@ -1,3 +1,6 @@
+#Add test PCAP generator for validation.
+#Introduces a programmatic packet capture generator to automatically create mock network traffic files for automated validation testing.
+
 #!/usr/bin/env python3
 """
 Generate a test PCAP file with various protocols for DPI testing.
