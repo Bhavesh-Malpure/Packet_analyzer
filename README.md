@@ -237,6 +237,8 @@ while (reader.readNextPacket(raw)) {
 - Read N bytes of packet data (N = header.incl_len)
 - Return false when no more packets
 
+
+
 ### **Step 3: Parse Protocol Headers**
 
 ```cpp
