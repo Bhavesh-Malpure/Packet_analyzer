@@ -8,7 +8,7 @@
 #include <chrono>
 
 namespace DPI {
-
+//Adding thread-safe queue interface
 // ============================================================================
 // Thread-safe queue for passing packets between threads
 // Used for: Reader -> LB -> FP communication
