@@ -133,3 +133,17 @@ LoadBalancer& LBManager::getLBForPacket(const FiveTuple& tuple) {
     int lb_index = hash % lbs_.size();
     return *lbs_[lb_index];
 }
+
+LBManager::AggregatedStats LBManager::getAggregatedStats() const {
+    AggregatedStats stats = {0, 0};
+    
+    for (const auto& lb : lbs_) {
+        auto lb_stats = lb->getStats();
+        stats.total_received += lb_stats.packets_received;
+        stats.total_dispatched += lb_stats.packets_dispatched;
+    }
+    
+    return stats;
+}
+
+} // namespace DPI
