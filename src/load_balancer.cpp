@@ -125,3 +125,11 @@ void LBManager::stopAll() {
         lb->stop();
     }
 }
+
+LoadBalancer& LBManager::getLBForPacket(const FiveTuple& tuple) {
+    // First level of load balancing: select LB based on hash
+    FiveTupleHash hasher;
+    size_t hash = hasher(tuple);
+    int lb_index = hash % lbs_.size();
+    return *lbs_[lb_index];
+}
