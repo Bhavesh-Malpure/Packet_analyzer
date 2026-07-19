@@ -109,3 +109,19 @@ LBManager::LBManager(int num_lbs, int fps_per_lb,
     std::cout << "[LBManager] Created " << num_lbs << " load balancers, "
               << fps_per_lb << " FPs each\n";
 }
+
+LBManager::~LBManager() {
+    stopAll();
+}
+
+void LBManager::startAll() {
+    for (auto& lb : lbs_) {
+        lb->start();
+    }
+}
+
+void LBManager::stopAll() {
+    for (auto& lb : lbs_) {
+        lb->stop();
+    }
+}
