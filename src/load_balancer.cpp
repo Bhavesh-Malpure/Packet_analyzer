@@ -84,3 +84,28 @@ LoadBalancer::LBStats LoadBalancer::getStats() const {
     
     return stats;
 }
+
+
+// ============================================================================
+// LBManager Implementation
+// ============================================================================
+
+LBManager::LBManager(int num_lbs, int fps_per_lb,
+                     std::vector<ThreadSafeQueue<PacketJob>*> fp_queues)
+    : fps_per_lb_(fps_per_lb) {
+    
+    // Create load balancers, each handling a subset of FPs
+    for (int lb_id = 0; lb_id < num_lbs; lb_id++) {
+        std::vector<ThreadSafeQueue<PacketJob>*> lb_fp_queues;
+        int fp_start = lb_id * fps_per_lb;
+        
+        for (int i = 0; i < fps_per_lb; i++) {
+            lb_fp_queues.push_back(fp_queues[fp_start + i]);
+        }
+        
+        lbs_.push_back(std::make_unique<LoadBalancer>(lb_id, lb_fp_queues, fp_start));
+    }
+    
+    std::cout << "[LBManager] Created " << num_lbs << " load balancers, "
+              << fps_per_lb << " FPs each\n";
+}
