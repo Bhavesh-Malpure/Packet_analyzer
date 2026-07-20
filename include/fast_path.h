@@ -12,8 +12,25 @@
 #include <functional>
 
 namespace DPI {
-using PacketOutputCallback = std::function<void(const PacketJob&, PacketAction)>;
 
+// ============================================================================
+// Fast Path Processor Thread
+// ============================================================================
+//
+// Each FP thread is responsible for:
+// 1. Receiving packets from its input queue (fed by LB)
+// 2. Connection tracking (maintaining flow state)
+// 3. Deep Packet Inspection (SNI extraction, protocol detection)
+// 4. Rule matching (blocking decisions)
+// 5. Forwarding or dropping packets
+//
+// FP threads are the workhorses of the DPI engine. They do the heavy lifting
+// of actually inspecting packet contents and making decisions.
+//
+// ============================================================================
+
+// Callback type for packet output (forwarding)
+using PacketOutputCallback = std::function<void(const PacketJob&, PacketAction)>;
 class FastPathProcessor {
 public:
     // Constructor
