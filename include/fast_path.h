@@ -31,6 +31,7 @@ namespace DPI {
 
 // Callback type for packet output (forwarding)
 using PacketOutputCallback = std::function<void(const PacketJob&, PacketAction)>;
+
 class FastPathProcessor {
 public:
     // Constructor
@@ -72,7 +73,6 @@ public:
     
     // Check if running
     bool isRunning() const { return running_; }
-
 
 private:
     int fp_id_;
