@@ -57,4 +57,21 @@ void FastPathProcessor::run() {
             continue;
         }
         
+        packets_processed_++;
         
+        // Process the packet
+        PacketAction action = processPacket(*job_opt);
+        
+        // Call output callback
+        if (output_callback_) {
+            output_callback_(*job_opt, action);
+        }
+        
+        // Update stats
+        if (action == PacketAction::DROP) {
+            packets_dropped_++;
+        } else {
+            packets_forwarded_++;
+        }
+    }
+}
