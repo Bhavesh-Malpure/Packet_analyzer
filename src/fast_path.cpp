@@ -396,3 +396,9 @@ std::string FPManager::generateClassificationReport() const {
            << std::setw(20) << std::left << bar << "   ║\n";
     }
     
+    ss << "╚══════════════════════════════════════════════════════════════╝\n";
+    
+    return ss.str();
+}
+
+} // namespace DPI
