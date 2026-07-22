@@ -334,3 +334,65 @@ FPManager::AggregatedStats FPManager::getAggregatedStats() const {
     
     return stats;
 }
+
+std::string FPManager::generateClassificationReport() const {
+    // Aggregate app distribution across all FPs
+    std::unordered_map<AppType, size_t> app_counts;
+    std::unordered_map<std::string, size_t> domain_counts;
+    size_t total_classified = 0;
+    size_t total_unknown = 0;
+    
+    for (const auto& fp : fps_) {
+        fp->getConnectionTracker().forEach([&](const Connection& conn) {
+            app_counts[conn.app_type]++;
+            
+            if (conn.app_type == AppType::UNKNOWN) {
+                total_unknown++;
+            } else {
+                total_classified++;
+            }
+            
+            if (!conn.sni.empty()) {
+                domain_counts[conn.sni]++;
+            }
+        });
+    }
+    
+    std::ostringstream ss;
+    ss << "\n╔══════════════════════════════════════════════════════════════╗\n";
+    ss << "║                 APPLICATION CLASSIFICATION REPORT             ║\n";
+    ss << "╠══════════════════════════════════════════════════════════════╣\n";
+    
+    size_t total = total_classified + total_unknown;
+    double classified_pct = total > 0 ? (100.0 * total_classified / total) : 0;
+    double unknown_pct = total > 0 ? (100.0 * total_unknown / total) : 0;
+    
+    ss << "║ Total Connections:    " << std::setw(10) << total << "                           ║\n";
+    ss << "║ Classified:           " << std::setw(10) << total_classified 
+       << " (" << std::fixed << std::setprecision(1) << classified_pct << "%)                  ║\n";
+    ss << "║ Unidentified:         " << std::setw(10) << total_unknown
+       << " (" << std::fixed << std::setprecision(1) << unknown_pct << "%)                  ║\n";
+    
+    ss << "╠══════════════════════════════════════════════════════════════╣\n";
+    ss << "║                    APPLICATION DISTRIBUTION                   ║\n";
+    ss << "╠══════════════════════════════════════════════════════════════╣\n";
+    
+    // Sort apps by count
+    std::vector<std::pair<AppType, size_t>> sorted_apps(
+        app_counts.begin(), app_counts.end());
+    std::sort(sorted_apps.begin(), sorted_apps.end(),
+              [](const auto& a, const auto& b) { return a.second > b.second; });
+    
+    for (const auto& pair : sorted_apps) {
+        double pct = total > 0 ? (100.0 * pair.second / total) : 0;
+        
+        // Create a simple bar graph
+        int bar_len = static_cast<int>(pct / 5);  // 20 chars max
+        std::string bar(bar_len, '#');
+        
+        ss << "║ " << std::setw(15) << std::left << appTypeToString(pair.first)
+           << std::setw(8) << std::right << pair.second
+           << " " << std::setw(5) << std::fixed << std::setprecision(1) << pct << "% "
+           << std::setw(20) << std::left << bar << "   ║\n";
+    }
+    
