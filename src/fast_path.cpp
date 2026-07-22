@@ -98,3 +98,239 @@ PacketAction FastPathProcessor::processPacket(PacketJob& job) {
         return PacketAction::DROP;
     }
    
+    // If connection not yet classified, try to inspect payload
+    if (conn->state != ConnectionState::CLASSIFIED && job.payload_length > 0) {
+        inspectPayload(job, conn);
+    }
+    
+    // Check rules (even for classified connections, as rules might change)
+    return checkRules(job, conn);
+}
+
+void FastPathProcessor::inspectPayload(PacketJob& job, Connection* conn) {
+    if (job.payload_length == 0 || job.payload_offset >= job.data.size()) {
+        return;
+    }
+    
+    const uint8_t* payload = job.data.data() + job.payload_offset;
+    
+    // Try TLS SNI extraction first (most common for HTTPS)
+    if (tryExtractSNI(job, conn)) {
+        return;
+    }
+    
+    // Try HTTP Host header extraction
+    if (tryExtractHTTPHost(job, conn)) {
+        return;
+    }
+    
+    // Check for DNS (port 53)
+    if (job.tuple.dst_port == 53 || job.tuple.src_port == 53) {
+        auto domain = DNSExtractor::extractQuery(payload, job.payload_length);
+        if (domain) {
+            conn_tracker_.classifyConnection(conn, AppType::DNS, *domain);
+            return;
+        }
+    }
+    
+    // Basic port-based classification as fallback
+    if (job.tuple.dst_port == 80) {
+        conn_tracker_.classifyConnection(conn, AppType::HTTP, "");
+    } else if (job.tuple.dst_port == 443) {
+        conn_tracker_.classifyConnection(conn, AppType::HTTPS, "");
+    }
+}
+
+bool FastPathProcessor::tryExtractSNI(const PacketJob& job, Connection* conn) {
+    // Only for port 443 (HTTPS) or if it looks like TLS
+    if (job.tuple.dst_port != 443 && job.payload_length < 50) {
+        return false;
+    }
+    
+    if (job.payload_offset >= job.data.size() || job.payload_length == 0) {
+        return false;
+    }
+    
+    const uint8_t* payload = job.data.data() + job.payload_offset;
+    auto sni = SNIExtractor::extract(payload, job.payload_length);
+    if (sni) {
+        sni_extractions_++;
+        
+        // Map SNI to app type
+        AppType app = sniToAppType(*sni);
+        conn_tracker_.classifyConnection(conn, app, *sni);
+        
+        if (app != AppType::UNKNOWN && app != AppType::HTTPS) {
+            classification_hits_++;
+        }
+        
+        return true;
+    }
+    
+    return false;
+}
+
+bool FastPathProcessor::tryExtractHTTPHost(const PacketJob& job, Connection* conn) {
+    // Only for port 80 (HTTP)
+    if (job.tuple.dst_port != 80) {
+        return false;
+    }
+    
+    if (job.payload_offset >= job.data.size() || job.payload_length == 0) {
+        return false;
+    }
+    
+    const uint8_t* payload = job.data.data() + job.payload_offset;
+    auto host = HTTPHostExtractor::extract(payload, job.payload_length);
+    if (host) {
+        AppType app = sniToAppType(*host);
+        conn_tracker_.classifyConnection(conn, app, *host);
+        
+        if (app != AppType::UNKNOWN && app != AppType::HTTP) {
+            classification_hits_++;
+        }
+        
+        return true;
+    }
+    
+    return false;
+}
+
+PacketAction FastPathProcessor::checkRules(const PacketJob& job, Connection* conn) {
+    if (!rule_manager_) {
+        return PacketAction::FORWARD;
+    }
+    
+    // Parse source IP from tuple
+    uint32_t src_ip = job.tuple.src_ip;
+    
+    // Check blocking rules
+    auto block_reason = rule_manager_->shouldBlock(
+        src_ip,
+        job.tuple.dst_port,
+        conn->app_type,
+        conn->sni
+    );
+    
+    if (block_reason) {
+        // Log the block
+        std::ostringstream ss;
+        ss << "[FP" << fp_id_ << "] BLOCKED packet: ";
+        
+        switch (block_reason->type) {
+            case RuleManager::BlockReason::IP:
+                ss << "IP " << block_reason->detail;
+                break;
+            case RuleManager::BlockReason::APP:
+                ss << "App " << block_reason->detail;
+                break;
+            case RuleManager::BlockReason::DOMAIN:
+                ss << "Domain " << block_reason->detail;
+                break;
+            case RuleManager::BlockReason::PORT:
+                ss << "Port " << block_reason->detail;
+                break;
+        }
+        
+        std::cout << ss.str() << std::endl;
+        
+        // Mark connection as blocked
+        conn_tracker_.blockConnection(conn);
+        
+        return PacketAction::DROP;
+    }
+    
+    return PacketAction::FORWARD;
+}
+
+void FastPathProcessor::updateTCPState(Connection* conn, uint8_t tcp_flags) {
+    constexpr uint8_t SYN = 0x02;
+    constexpr uint8_t ACK = 0x10;
+    constexpr uint8_t FIN = 0x01;
+    constexpr uint8_t RST = 0x04;
+    
+    if (tcp_flags & SYN) {
+        if (tcp_flags & ACK) {
+            conn->syn_ack_seen = true;
+        } else {
+            conn->syn_seen = true;
+        }
+    }
+    
+    if (conn->syn_seen && conn->syn_ack_seen && (tcp_flags & ACK)) {
+        if (conn->state == ConnectionState::NEW) {
+            conn->state = ConnectionState::ESTABLISHED;
+        }
+    }
+    
+    if (tcp_flags & FIN) {
+        conn->fin_seen = true;
+    }
+    
+    if (tcp_flags & RST) {
+        conn->state = ConnectionState::CLOSED;
+    }
+    
+    if (conn->fin_seen && (tcp_flags & ACK)) {
+        conn->state = ConnectionState::CLOSED;
+    }
+}
+
+FastPathProcessor::FPStats FastPathProcessor::getStats() const {
+    FPStats stats;
+    stats.packets_processed = packets_processed_.load();
+    stats.packets_forwarded = packets_forwarded_.load();
+    stats.packets_dropped = packets_dropped_.load();
+    stats.connections_tracked = conn_tracker_.getActiveCount();
+    stats.sni_extractions = sni_extractions_.load();
+    stats.classification_hits = classification_hits_.load();
+    return stats;
+}
+
+// ============================================================================
+// FPManager Implementation
+// ============================================================================
+
+FPManager::FPManager(int num_fps,
+                     RuleManager* rule_manager,
+                     PacketOutputCallback output_callback) {
+    
+    // Create FP processors (each has its own input queue)
+    for (int i = 0; i < num_fps; i++) {
+        auto fp = std::make_unique<FastPathProcessor>(i, rule_manager, output_callback);
+        fps_.push_back(std::move(fp));
+    }
+    
+    std::cout << "[FPManager] Created " << num_fps << " fast path processors\n";
+}
+
+FPManager::~FPManager() {
+    stopAll();
+}
+
+void FPManager::startAll() {
+    for (auto& fp : fps_) {
+        fp->start();
+    }
+}
+
+void FPManager::stopAll() {
+    // Stop all FPs (they'll shutdown their own queues)
+    for (auto& fp : fps_) {
+        fp->stop();
+    }
+}
+
+FPManager::AggregatedStats FPManager::getAggregatedStats() const {
+    AggregatedStats stats = {0, 0, 0, 0};
+    
+    for (const auto& fp : fps_) {
+        auto fp_stats = fp->getStats();
+        stats.total_processed += fp_stats.packets_processed;
+        stats.total_forwarded += fp_stats.packets_forwarded;
+        stats.total_dropped += fp_stats.packets_dropped;
+        stats.total_connections += fp_stats.connections_tracked;
+    }
+    
+    return stats;
+}
