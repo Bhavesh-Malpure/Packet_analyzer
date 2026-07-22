@@ -75,3 +75,26 @@ void FastPathProcessor::run() {
         }
     }
 }
+
+PacketAction FastPathProcessor::processPacket(PacketJob& job) {
+    // Get or create connection
+    Connection* conn = conn_tracker_.getOrCreateConnection(job.tuple);
+    if (!conn) {
+        // Should not happen, but handle gracefully
+        return PacketAction::FORWARD;
+    }
+    
+    // Update connection stats
+    bool is_outbound = true;  // In this model, all packets from user are outbound
+    conn_tracker_.updateConnection(conn, job.data.size(), is_outbound);
+    
+    // Update TCP state if applicable
+    if (job.tuple.protocol == 6) {  // TCP
+        updateTCPState(conn, job.tcp_flags);
+    }
+    
+    // If connection is already blocked, drop immediately
+    if (conn->state == ConnectionState::BLOCKED) {
+        return PacketAction::DROP;
+    }
+   
