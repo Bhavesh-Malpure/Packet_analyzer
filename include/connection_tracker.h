@@ -23,3 +23,53 @@ namespace DPI {
 // - Maintain per-flow statistics
 // - Timeout inactive connections
 // ============================================================================
+
+class ConnectionTracker {
+public:
+    ConnectionTracker(int fp_id, size_t max_connections = 100000);
+    
+    // Get or create connection entry
+    // Returns pointer to existing or newly created connection
+    Connection* getOrCreateConnection(const FiveTuple& tuple);
+    
+    // Get existing connection (returns nullptr if not found)
+    Connection* getConnection(const FiveTuple& tuple);
+    
+    // Update connection with new packet
+    void updateConnection(Connection* conn, size_t packet_size, bool is_outbound);
+    
+    // Mark connection as classified
+    void classifyConnection(Connection* conn, AppType app, const std::string& sni);
+    
+    // Mark connection as blocked
+    void blockConnection(Connection* conn);
+    
+    // Mark connection as closed
+    void closeConnection(const FiveTuple& tuple);
+    
+    // Remove timed-out connections
+    // Returns number of connections removed
+    size_t cleanupStale(std::chrono::seconds timeout = std::chrono::seconds(300));
+    
+    // Get all connections (for reporting)
+    std::vector<Connection> getAllConnections() const;
+    
+    // Get active connection count
+    size_t getActiveCount() const;
+    
+    // Get statistics
+    struct TrackerStats {
+        size_t active_connections;
+        size_t total_connections_seen;
+        size_t classified_connections;
+        size_t blocked_connections;
+    };
+    
+    TrackerStats getStats() const;
+    
+    // Clear all connections
+    void clear();
+    
+    // Iteration callback for all connections
+    void forEach(std::function<void(const Connection&)> callback) const;
+
