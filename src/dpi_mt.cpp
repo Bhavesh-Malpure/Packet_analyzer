@@ -76,3 +76,111 @@ private:
     size_t max_size_;
     std::atomic<bool> shutdown_;
 };
+
+// =============================================================================
+// Packet Job - Contains all packet data (self-contained, no pointers)
+// =============================================================================
+struct Packet {
+    uint32_t id;
+    uint32_t ts_sec;
+    uint32_t ts_usec;
+    FiveTuple tuple;
+    std::vector<uint8_t> data;
+    uint8_t tcp_flags;
+    size_t payload_offset;
+    size_t payload_length;
+};
+
+// =============================================================================
+// Flow Entry
+// =============================================================================
+struct FlowEntry {
+    FiveTuple tuple;
+    AppType app_type = AppType::UNKNOWN;
+    std::string sni;
+    uint64_t packets = 0;
+    uint64_t bytes = 0;
+    bool blocked = false;
+    bool classified = false;
+};
+
+// =============================================================================
+// Blocking Rules
+// =============================================================================
+class Rules {
+public:
+    void blockIP(const std::string& ip) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        blocked_ips_.insert(parseIP(ip));
+        std::cout << "[Rules] Blocked IP: " << ip << "\n";
+    }
+    
+    void blockApp(const std::string& app) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        for (int i = 0; i < static_cast<int>(AppType::APP_COUNT); i++) {
+            if (appTypeToString(static_cast<AppType>(i)) == app) {
+                blocked_apps_.insert(static_cast<AppType>(i));
+                std::cout << "[Rules] Blocked app: " << app << "\n";
+                return;
+            }
+        }
+        std::cerr << "[Rules] Unknown app: " << app << "\n";
+    }
+    
+    void blockDomain(const std::string& domain) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        blocked_domains_.push_back(domain);
+        std::cout << "[Rules] Blocked domain: " << domain << "\n";
+    }
+    
+    bool isBlocked(uint32_t src_ip, AppType app, const std::string& sni) const {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (blocked_ips_.count(src_ip)) return true;
+        if (blocked_apps_.count(app)) return true;
+        for (const auto& dom : blocked_domains_) {
+            if (sni.find(dom) != std::string::npos) return true;
+        }
+        return false;
+    }
+
+private:
+    static uint32_t parseIP(const std::string& ip) {
+        uint32_t result = 0;
+        int octet = 0, shift = 0;
+        for (char c : ip) {
+            if (c == '.') { result |= (octet << shift); shift += 8; octet = 0; }
+            else if (c >= '0' && c <= '9') octet = octet * 10 + (c - '0');
+        }
+        return result | (octet << shift);
+    }
+    
+    mutable std::mutex mutex_;
+    std::unordered_set<uint32_t> blocked_ips_;
+    std::unordered_set<AppType> blocked_apps_;
+    std::vector<std::string> blocked_domains_;
+};
+
+// =============================================================================
+// Statistics (thread-safe)
+// =============================================================================
+struct Stats {
+    std::atomic<uint64_t> total_packets{0};
+    std::atomic<uint64_t> total_bytes{0};
+    std::atomic<uint64_t> forwarded{0};
+    std::atomic<uint64_t> dropped{0};
+    std::atomic<uint64_t> tcp_packets{0};
+    std::atomic<uint64_t> udp_packets{0};
+    
+    // Per-app stats (protected by mutex)
+    std::mutex app_mutex;
+    std::unordered_map<AppType, uint64_t> app_counts;
+    std::unordered_map<std::string, AppType> detected_snis;
+    
+    void recordApp(AppType app, const std::string& sni) {
+        std::lock_guard<std::mutex> lock(app_mutex);
+        app_counts[app]++;
+        if (!sni.empty()) {
+            detected_snis[sni] = app;
+        }
+    }
+};
