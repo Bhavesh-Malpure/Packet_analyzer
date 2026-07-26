@@ -67,3 +67,12 @@ public:
     }
     
     bool is_shutdown() const { return shutdown_; }
+
+private:
+    std::queue<T> queue_;
+    mutable std::mutex mutex_;
+    std::condition_variable not_empty_;
+    std::condition_variable not_full_;
+    size_t max_size_;
+    std::atomic<bool> shutdown_;
+};
