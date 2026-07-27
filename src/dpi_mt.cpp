@@ -258,3 +258,92 @@ private:
             }
         }
     }
+    
+    void classifyFlow(Packet& pkt, FlowEntry& flow) {
+        // Try SNI extraction for HTTPS
+        if (pkt.tuple.dst_port == 443 && pkt.payload_length > 5) {
+            const uint8_t* payload = pkt.data.data() + pkt.payload_offset;
+            auto sni = SNIExtractor::extract(payload, pkt.payload_length);
+            if (sni) {
+                flow.sni = *sni;
+                flow.app_type = sniToAppType(*sni);
+                flow.classified = true;
+                return;
+            }
+        }
+        
+        // Try HTTP Host extraction
+        if (pkt.tuple.dst_port == 80 && pkt.payload_length > 10) {
+            const uint8_t* payload = pkt.data.data() + pkt.payload_offset;
+            auto host = HTTPHostExtractor::extract(payload, pkt.payload_length);
+            if (host) {
+                flow.sni = *host;
+                flow.app_type = sniToAppType(*host);
+                flow.classified = true;
+                return;
+            }
+        }
+        
+        // DNS
+        if (pkt.tuple.dst_port == 53 || pkt.tuple.src_port == 53) {
+            flow.app_type = AppType::DNS;
+            flow.classified = true;
+            return;
+        }
+        
+        // Port-based fallback (but don't mark as classified - might get SNI later)
+        if (pkt.tuple.dst_port == 443) {
+            flow.app_type = AppType::HTTPS;
+        } else if (pkt.tuple.dst_port == 80) {
+            flow.app_type = AppType::HTTP;
+        }
+    }
+};
+
+// =============================================================================
+// Load Balancer (one per LB thread)
+// =============================================================================
+class LoadBalancer {
+public:
+    LoadBalancer(int id, std::vector<FastPath*> fps)
+        : id_(id), fps_(std::move(fps)), num_fps_(fps_.size()) {}
+    
+    void start() {
+        running_ = true;
+        thread_ = std::thread(&LoadBalancer::run, this);
+    }
+    
+    void stop() {
+        running_ = false;
+        input_queue_.shutdown();
+        if (thread_.joinable()) thread_.join();
+    }
+    
+    TSQueue<Packet>& queue() { return input_queue_; }
+    
+    uint64_t dispatched() const { return dispatched_; }
+
+private:
+    int id_;
+    std::vector<FastPath*> fps_;
+    size_t num_fps_;
+    TSQueue<Packet> input_queue_;
+    
+    std::atomic<bool> running_{false};
+    std::thread thread_;
+    std::atomic<uint64_t> dispatched_{0};
+    
+    void run() {
+        while (running_) {
+            auto pkt_opt = input_queue_.pop(100);
+            if (!pkt_opt) continue;
+            
+            // Hash to select FP
+            FiveTupleHash hasher;
+            size_t fp_idx = hasher(pkt_opt->tuple) % num_fps_;
+            
+            fps_[fp_idx]->queue().push(std::move(*pkt_opt));
+            dispatched_++;
+        }
+    }
+};
