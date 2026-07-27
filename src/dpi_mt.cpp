@@ -184,3 +184,77 @@ struct Stats {
         }
     }
 };
+
+// =============================================================================
+// Fast Path Processor (one per FP thread)
+// =============================================================================
+class FastPath {
+public:
+    FastPath(int id, Rules* rules, Stats* stats, TSQueue<Packet>* output_queue)
+        : id_(id), rules_(rules), stats_(stats), output_queue_(output_queue) {}
+    
+    void start() {
+        running_ = true;
+        thread_ = std::thread(&FastPath::run, this);
+    }
+    
+    void stop() {
+        running_ = false;
+        input_queue_.shutdown();
+        if (thread_.joinable()) thread_.join();
+    }
+    
+    TSQueue<Packet>& queue() { return input_queue_; }
+    
+    uint64_t processed() const { return processed_; }
+
+private:
+    int id_;
+    Rules* rules_;
+    Stats* stats_;
+    TSQueue<Packet>* output_queue_;
+    TSQueue<Packet> input_queue_;
+    std::unordered_map<FiveTuple, FlowEntry, FiveTupleHash> flows_;
+    
+    std::atomic<bool> running_{false};
+    std::thread thread_;
+    std::atomic<uint64_t> processed_{0};
+    
+    void run() {
+        while (running_) {
+            auto pkt_opt = input_queue_.pop(100);
+            if (!pkt_opt) continue;
+            
+            processed_++;
+            Packet& pkt = *pkt_opt;
+            
+            // Get or create flow
+            FlowEntry& flow = flows_[pkt.tuple];
+            if (flow.packets == 0) {
+                flow.tuple = pkt.tuple;
+            }
+            flow.packets++;
+            flow.bytes += pkt.data.size();
+            
+            // Try to classify if not done yet
+            if (!flow.classified) {
+                classifyFlow(pkt, flow);
+            }
+            
+            // Check blocking
+            if (!flow.blocked) {
+                flow.blocked = rules_->isBlocked(pkt.tuple.src_ip, flow.app_type, flow.sni);
+            }
+            
+            // Record stats
+            stats_->recordApp(flow.app_type, flow.sni);
+            
+            // Forward or drop
+            if (flow.blocked) {
+                stats_->dropped++;
+            } else {
+                stats_->forwarded++;
+                output_queue_->push(std::move(pkt));
+            }
+        }
+    }
