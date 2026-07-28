@@ -385,3 +385,111 @@ public:
             lbs_.push_back(std::make_unique<LoadBalancer>(lb, std::move(lb_fps)));
         }
     }
+    void blockIP(const std::string& ip) { rules_.blockIP(ip); }
+    void blockApp(const std::string& app) { rules_.blockApp(app); }
+    void blockDomain(const std::string& dom) { rules_.blockDomain(dom); }
+    
+    bool process(const std::string& input_file, const std::string& output_file) {
+        // Open input
+        PcapReader reader;
+        if (!reader.open(input_file)) return false;
+        
+        // Open output
+        std::ofstream output(output_file, std::ios::binary);
+        if (!output.is_open()) {
+            std::cerr << "Cannot open output file\n";
+            return false;
+        }
+        
+        // Write PCAP header
+        const auto& hdr = reader.getGlobalHeader();
+        output.write(reinterpret_cast<const char*>(&hdr), sizeof(hdr));
+        
+        // Start all threads
+        for (auto& fp : fps_) fp->start();
+        for (auto& lb : lbs_) lb->start();
+        
+        // Start output writer thread
+        std::atomic<bool> output_running{true};
+        std::thread output_thread([&]() {
+            while (output_running || output_queue_.size() > 0) {
+                auto pkt_opt = output_queue_.pop(50);
+                if (!pkt_opt) continue;
+                
+                PcapPacketHeader phdr;
+                phdr.ts_sec = pkt_opt->ts_sec;
+                phdr.ts_usec = pkt_opt->ts_usec;
+                phdr.incl_len = pkt_opt->data.size();
+                phdr.orig_len = pkt_opt->data.size();
+                
+                output.write(reinterpret_cast<const char*>(&phdr), sizeof(phdr));
+                output.write(reinterpret_cast<const char*>(pkt_opt->data.data()), pkt_opt->data.size());
+            }
+        });
+        
+        // Read and dispatch packets
+        std::cout << "[Reader] Processing packets...\n";
+        RawPacket raw;
+        ParsedPacket parsed;
+        uint32_t pkt_id = 0;
+        
+        while (reader.readNextPacket(raw)) {
+            if (!PacketParser::parse(raw, parsed)) continue;
+            if (!parsed.has_ip || (!parsed.has_tcp && !parsed.has_udp)) continue;
+            
+            // Create packet
+            Packet pkt;
+            pkt.id = pkt_id++;
+            pkt.ts_sec = raw.header.ts_sec;
+            pkt.ts_usec = raw.header.ts_usec;
+            pkt.tcp_flags = parsed.tcp_flags;
+            pkt.data = std::move(raw.data);
+            
+            // Parse 5-tuple
+            auto parseIP = [](const std::string& ip) -> uint32_t {
+                uint32_t result = 0;
+                int octet = 0, shift = 0;
+                for (char c : ip) {
+                    if (c == '.') { result |= (octet << shift); shift += 8; octet = 0; }
+                    else if (c >= '0' && c <= '9') octet = octet * 10 + (c - '0');
+                }
+                return result | (octet << shift);
+            };
+            
+            pkt.tuple.src_ip = parseIP(parsed.src_ip);
+            pkt.tuple.dst_ip = parseIP(parsed.dest_ip);
+            pkt.tuple.src_port = parsed.src_port;
+            pkt.tuple.dst_port = parsed.dest_port;
+            pkt.tuple.protocol = parsed.protocol;
+            
+            // Calculate payload offset
+            pkt.payload_offset = 14;  // Ethernet
+            if (pkt.data.size() > 14) {
+                uint8_t ip_ihl = pkt.data[14] & 0x0F;
+                pkt.payload_offset += ip_ihl * 4;
+                
+                if (parsed.has_tcp && pkt.payload_offset + 12 < pkt.data.size()) {
+                    uint8_t tcp_off = (pkt.data[pkt.payload_offset + 12] >> 4) & 0x0F;
+                    pkt.payload_offset += tcp_off * 4;
+                } else if (parsed.has_udp) {
+                    pkt.payload_offset += 8;
+                }
+                
+                if (pkt.payload_offset < pkt.data.size()) {
+                    pkt.payload_length = pkt.data.size() - pkt.payload_offset;
+                } else {
+                    pkt.payload_length = 0;
+                }
+            }
+            
+            // Update stats
+            stats_.total_packets++;
+            stats_.total_bytes += pkt.data.size();
+            if (parsed.has_tcp) stats_.tcp_packets++;
+            else if (parsed.has_udp) stats_.udp_packets++;
+            
+            // Dispatch to LB (hash-based)
+            FiveTupleHash hasher;
+            size_t lb_idx = hasher(pkt.tuple) % lbs_.size();
+            lbs_[lb_idx]->queue().push(std::move(pkt));
+        }
