@@ -493,3 +493,26 @@ public:
             size_t lb_idx = hasher(pkt.tuple) % lbs_.size();
             lbs_[lb_idx]->queue().push(std::move(pkt));
         }
+
+
+std::cout << "[Reader] Done reading " << pkt_id << " packets\n";
+        reader.close();
+        
+        // Wait for queues to drain
+        std::this_thread::sleep_for(std::chrono::milliseconds(500));
+        
+        // Stop all threads
+        for (auto& lb : lbs_) lb->stop();
+        for (auto& fp : fps_) fp->stop();
+        
+        output_running = false;
+        output_queue_.shutdown();
+        output_thread.join();
+        
+        output.close();
+        
+        // Print report
+        printReport();
+        
+        return true;
+    }
