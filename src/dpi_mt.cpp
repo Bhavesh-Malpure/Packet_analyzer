@@ -347,3 +347,41 @@ private:
         }
     }
 };
+
+// =============================================================================
+// DPI Engine
+// =============================================================================
+class DPIEngine {
+public:
+    struct Config {
+        int num_lbs = 2;
+        int fps_per_lb = 2;
+    };
+    
+    DPIEngine(const Config& cfg) : config_(cfg) {
+        int total_fps = cfg.num_lbs * cfg.fps_per_lb;
+        
+        std::cout << "\n";
+        std::cout << "╔══════════════════════════════════════════════════════════════╗\n";
+        std::cout << "║              DPI ENGINE v2.0 (Multi-threaded)                 ║\n";
+        std::cout << "╠══════════════════════════════════════════════════════════════╣\n";
+        std::cout << "║ Load Balancers: " << std::setw(2) << cfg.num_lbs 
+                  << "    FPs per LB: " << std::setw(2) << cfg.fps_per_lb
+                  << "    Total FPs: " << std::setw(2) << total_fps << "     ║\n";
+        std::cout << "╚══════════════════════════════════════════════════════════════╝\n\n";
+        
+        // Create FP threads
+        for (int i = 0; i < total_fps; i++) {
+            fps_.push_back(std::make_unique<FastPath>(i, &rules_, &stats_, &output_queue_));
+        }
+        
+        // Create LB threads, each managing a subset of FPs
+        for (int lb = 0; lb < cfg.num_lbs; lb++) {
+            std::vector<FastPath*> lb_fps;
+            int start = lb * cfg.fps_per_lb;
+            for (int i = 0; i < cfg.fps_per_lb; i++) {
+                lb_fps.push_back(fps_[start + i].get());
+            }
+            lbs_.push_back(std::make_unique<LoadBalancer>(lb, std::move(lb_fps)));
+        }
+    }
