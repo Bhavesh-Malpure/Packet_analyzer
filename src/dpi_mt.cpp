@@ -605,3 +605,38 @@ Example:
   )" << prog << R"( capture.pcap filtered.pcap --block-app YouTube --block-ip 192.168.1.50
 )";
 }
+int main(int argc, char* argv[]) {
+    if (argc < 3) {
+        printUsage(argv[0]);
+        return 1;
+    }
+    
+    std::string input = argv[1];
+    std::string output = argv[2];
+    
+    DPIEngine::Config cfg;
+    std::vector<std::string> block_ips, block_apps, block_domains;
+    
+    for (int i = 3; i < argc; i++) {
+        std::string arg = argv[i];
+        if (arg == "--block-ip" && i + 1 < argc) block_ips.push_back(argv[++i]);
+        else if (arg == "--block-app" && i + 1 < argc) block_apps.push_back(argv[++i]);
+        else if (arg == "--block-domain" && i + 1 < argc) block_domains.push_back(argv[++i]);
+        else if (arg == "--lbs" && i + 1 < argc) cfg.num_lbs = std::stoi(argv[++i]);
+        else if (arg == "--fps" && i + 1 < argc) cfg.fps_per_lb = std::stoi(argv[++i]);
+    }
+    
+    DPIEngine engine(cfg);
+    
+    for (const auto& ip : block_ips) engine.blockIP(ip);
+    for (const auto& app : block_apps) engine.blockApp(app);
+    for (const auto& dom : block_domains) engine.blockDomain(dom);
+    
+    if (!engine.process(input, output)) {
+        return 1;
+    }
+    
+    std::cout << "\nOutput written to: " << output << "\n";
+    return 0;
+}
+
