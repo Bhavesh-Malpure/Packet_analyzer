@@ -583,3 +583,25 @@ private:
         }
     }
 };
+
+// =============================================================================
+// Main
+// =============================================================================
+void printUsage(const char* prog) {
+    std::cout << R"(
+DPI Engine v2.0 - Multi-threaded Deep Packet Inspection
+========================================================
+
+Usage: )" << prog << R"( <input.pcap> <output.pcap> [options]
+
+Options:
+  --block-ip <ip>        Block source IP
+  --block-app <app>      Block application (YouTube, Facebook, etc.)
+  --block-domain <dom>   Block domain (substring match)
+  --lbs <n>              Number of load balancer threads (default: 2)
+  --fps <n>              FP threads per LB (default: 2)
+
+Example:
+  )" << prog << R"( capture.pcap filtered.pcap --block-app YouTube --block-ip 192.168.1.50
+)";
+}
