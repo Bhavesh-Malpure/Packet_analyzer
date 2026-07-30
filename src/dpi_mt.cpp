@@ -605,6 +605,7 @@ Example:
   )" << prog << R"( capture.pcap filtered.pcap --block-app YouTube --block-ip 192.168.1.50
 )";
 }
+
 int main(int argc, char* argv[]) {
     if (argc < 3) {
         printUsage(argv[0]);
@@ -639,4 +640,3 @@ int main(int argc, char* argv[]) {
     std::cout << "\nOutput written to: " << output << "\n";
     return 0;
 }
-
