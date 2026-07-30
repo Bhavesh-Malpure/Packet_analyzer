@@ -26,3 +26,34 @@ inline bool isLittleEndian() {
     uint16_t test = 0x0001;
     return *reinterpret_cast<uint8_t*>(&test) == 0x01;
 }
+
+// Network to host byte order (16-bit)
+// Network byte order is always big-endian
+inline uint16_t netToHost16(uint16_t netValue) {
+    if (isLittleEndian()) {
+        return swapBytes16(netValue);
+    }
+    return netValue;
+}
+
+// Network to host byte order (32-bit)
+inline uint32_t netToHost32(uint32_t netValue) {
+    if (isLittleEndian()) {
+        return swapBytes32(netValue);
+    }
+    return netValue;
+}
+
+// Host to network byte order (16-bit)
+inline uint16_t hostToNet16(uint16_t hostValue) {
+    return netToHost16(hostValue);  // Same operation
+}
+
+// Host to network byte order (32-bit)
+inline uint32_t hostToNet32(uint32_t hostValue) {
+    return netToHost32(hostValue);  // Same operation
+}
+
+} // namespace PortableNet
+
+#endif // PLATFORM_H
